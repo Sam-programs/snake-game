@@ -78,10 +78,10 @@ int snake_collide_with_itself_why_so_long(Snake *snake)
    for (int i = 0; i < snake->len; i++) {
       if (snake->positions[i].x == snake->head.x &&
           snake->positions[i].y == snake->head.y) {
-         return 1;
+         return TRUE;
       }
    }
-   return 0;
+   return FALSE;
 }
 
 void on_lose(Snake *snake, Pos *apple)
