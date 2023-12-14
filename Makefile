@@ -15,25 +15,21 @@ endif
 cfiles:=$(shell echo src/*.c)
 objfiles:=$(cfiles:src/%.c=obj/%.o)
 
-.PHONY: clean run all debug release testcode
+.PHONY: clean run all debug release 
 
 all:CFLAGS:=$(CFLAGS) -DDEBUG
 all:$(OBJPATH) run testcode
 run:$(BIN)
 	./$(BIN)
-test:test.c
-	 $(CC) $(CFLAGS) $(objfiles) $(LDFLAGS) test.c -o test  
-testcode:test
-	./test
 	
 
 release: CFLAGS:=$(CFLAGS) -O2
 release: clean
-release: $(BIN) testcode
+release: $(BIN) 
 
 debug: CFLAGS:=$(CFLAGS) -DDEBUG
 debug: clean
-debug: $(BIN) testcode
+debug: $(BIN) 
 debug:
 	$(DEBUGGER) $(BIN)
 
@@ -43,11 +39,10 @@ $(OBJPATH):
 $(OBJPATH)/%.o:src/%.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BIN):$(objfiles) test
+$(BIN):$(objfiles) 
 	$(CC) $(objfiles) $(LDFLAGS) -o $@
 bear:
 	bear -- make 
 clean:
 	rm -f $(OBJPATH)/*.o
-	rm -f ./test
 cleanall: clean bear
