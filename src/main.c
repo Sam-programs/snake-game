@@ -1,4 +1,6 @@
 #include <curses.h>
+#include <math.h>
+#include <time.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -10,6 +12,10 @@ char *continue_msg = "[Press Any Key To Continue]";
 
 WINDOW *win = NULL;
 
+int attempt = 1;
+
+int highest = 0;
+
 typedef enum direction {
    NONE = 0,
    UP = 1,
@@ -18,10 +24,15 @@ typedef enum direction {
    RIGHT = 8
 } direction;
 
+#define OPPSITE_YDIR(dir) dir == UP ? DOWN : UP
+#define BETWEEN(x, a, b)  x > a &&x < b
+
+#define OPPSITE_XDIR(dir) dir == RIGHT ? LEFT : RIGHT
+
 int up_keys[] = {'w', KEY_UP, 'k'};
 int down_keys[] = {'s', KEY_DOWN, 'j'};
-int left_keys[] = {'a', KEY_LEFT, 'h'};
 int right_keys[] = {'d', KEY_RIGHT, 'l'};
+int left_keys[] = {'a', KEY_LEFT, 'h'};
 
 typedef struct {
    int y;
@@ -45,6 +56,33 @@ int in(int arr[], int len, int x)
    return FALSE;
 }
 
+int in_pos(Pos arr[], int len, Pos a)
+{
+   for (int i = 0; i < len; i++) {
+      if (arr[i].x == a.x && arr[i].y == a.y) {
+         return TRUE;
+      }
+   }
+   return FALSE;
+}
+
+double distance(Pos a, Pos b)
+{
+   int    x = abs(a.x - b.x);
+   int    y = abs(a.x - b.y);
+   double res = sqrt(x * x + y * y);
+   return res;
+}
+
+int move_is_safe(Snake *snake, Pos pos)
+{
+   if (!in_pos(snake->positions, snake->len, pos) && BETWEEN(pos.x, 0, COLS) &&
+       BETWEEN(pos.y, 1, LINES)) {
+      return TRUE;
+   }
+   return FALSE;
+}
+
 direction get_keydir(int key)
 {
    if (in(up_keys, 3, key)) {
@@ -62,15 +100,14 @@ direction get_keydir(int key)
    return NONE;
 }
 
-void randomize_apple(Pos *apple)
+void randomize_apple(Snake *snake, Pos *apple)
 {
-   // don't spawn the apple on the edges because that's just mean
-   apple->y = rand() % (LINES - 1);
-   // 2 here is to be far from the score display
-   apple->y = apple->y < 2 ? 2 : apple->y;
-
-   apple->x = rand() % (COLS - 1);
-   apple->x = apple->x == 0 ? 1 : apple->x;
+   apple->y = rand() % (LINES - 1 - 2) + 2;
+   apple->x = rand() % (COLS - 1 - 1) + 1;
+   while (in_pos(snake->positions, snake->len, *apple)) {
+      apple->y = rand() % (LINES - 1 - 2) + 2;
+      apple->x = rand() % (COLS - 1 - 1) + 1;
+   }
 }
 
 int snake_collide_with_itself_why_so_long(Snake *snake)
@@ -84,23 +121,110 @@ int snake_collide_with_itself_why_so_long(Snake *snake)
    return FALSE;
 }
 
+// GOAL goto apple without touching body
+direction ai_get_direction(Snake *snake, Pos *apple)
+{
+   Pos      *head = &snake->head;
+   direction xdir = NONE;
+   int       xsafe = FALSE;
+   direction ydir = NONE;
+   int       ysafe = FALSE;
+   if (head->x < apple->x) {
+      xdir = RIGHT;
+
+      Pos next_pos = *head;
+      next_pos.x++;
+      if (move_is_safe(snake, next_pos)) {
+         xsafe = true;
+      }
+   }
+   if (head->x > apple->x) {
+      xdir = LEFT;
+
+      Pos next_pos = *head;
+      next_pos.x--;
+      if (move_is_safe(snake, next_pos)) {
+         xsafe = true;
+      }
+   }
+
+   if (head->y < apple->y) {
+      ydir = DOWN;
+
+      Pos next_pos = *head;
+      next_pos.y++;
+      if (move_is_safe(snake, next_pos)) {
+         ysafe = true;
+      }
+   }
+   if (head->y > apple->y) {
+      ydir = UP;
+
+      Pos next_pos = *head;
+      next_pos.y--;
+      if (move_is_safe(snake, next_pos)) {
+         ysafe = true;
+      }
+   }
+   direction dir = NONE;
+   if (xsafe) {
+      dir = xdir;
+   } else if (ysafe) {
+      dir = ydir;
+   } else {
+      double xdist;
+      double ydist;
+      Pos    next_pos = *head;
+      if (xdir == NONE) {
+         next_pos.x--;
+         if (move_is_safe(snake, next_pos)) {
+            dir = LEFT;
+            xdist = distance(*apple, next_pos);
+         }
+
+         next_pos = *head;
+         next_pos.x++;
+         if (move_is_safe(snake, next_pos)) {
+            dir = RIGHT;
+            xdist = distance(*apple, next_pos);
+         }
+      } else {
+         if (OPPSITE_XDIR(xdir) == LEFT) {
+            next_pos.x--;
+         } else {
+            next_pos.x++;
+         }
+         if (move_is_safe(snake, next_pos)) {
+            dir = OPPSITE_XDIR(xdir);
+         }
+      }
+      xdist = distance(*apple, next_pos);
+
+      next_pos = *head;
+      if (OPPSITE_YDIR(ydir) == DOWN) {
+         next_pos.y++;
+      } else {
+         next_pos.y--;
+      }
+      ydist = distance(*apple, next_pos);
+      if (dir == NONE || ydist < xdist) {
+         if (move_is_safe(snake, next_pos)) {
+            dir = OPPSITE_YDIR(ydir);
+         }
+      }
+   }
+   return dir;
+}
+
 void on_lose(Snake *snake, Pos *apple)
 {
+   attempt++;
    snake->head.x = 0;
    snake->head.y = 0;
    snake->len = 0;
-   mvwaddstr(win, LINES / 2, COLS / 2 - strlen(lose_msg) / 2, lose_msg);
-   mvwaddstr(
-       win, LINES / 2 + 1, COLS / 2 - strlen(continue_msg) / 2, continue_msg
-   );
-   wrefresh(win);
-   nodelay(win, false);
-   int key = wgetch(win);
-   nodelay(win, true);
-   werase(win);
-   randomize_apple(apple);
    snake->head.x = COLS / 2;
    snake->head.y = LINES / 2;
+   werase(win);
 }
 
 void movepre(Snake *snake, Pos *ignore)
@@ -117,6 +241,9 @@ void movepre(Snake *snake, Pos *ignore)
 void on_eat(Snake *snake, Pos *apple)
 {
    snake->len++;
+   if (snake->len > highest) {
+      highest = snake->len;
+   }
    if (snake->len > snake->pos_capacity) {
       snake->pos_capacity = snake->len * 1.5;
       snake->positions =
@@ -127,7 +254,7 @@ void on_eat(Snake *snake, Pos *apple)
       }
    }
    snake->positions[snake->len - 1] = (Pos){0};
-   randomize_apple(apple);
+   randomize_apple(snake, apple);
 }
 
 int main(void)
@@ -137,30 +264,28 @@ int main(void)
    cbreak();
    keypad(win, true);
    nodelay(win, true);
-   direction cur_dir = NONE;
-   Snake     snake = {
-           .len = 0,
-           .pos_capacity = 1,
-           .positions = malloc(sizeof(Pos)),
-           .head = {LINES / 2, COLS / 2}};
+   Snake snake = {
+       .len = 0,
+       .pos_capacity = 1,
+       .positions = malloc(sizeof(Pos)),
+       .head = {LINES / 2, COLS / 2}
+   };
    Pos *head = &snake.head;
    Pos  apple = {rand() % LINES, rand() % COLS};
+   int  sleep_time = 60000;
+   srand(time(NULL));
    while (true) {
       int key = wgetch(win);
-      // read everything
-      while (true) {
-         int input = wgetch(win);
-         if (input == ERR) {
-            break;
+      if (key == ' ') {
+         if (sleep_time == 2000) {
+            sleep_time = 60000;
+         } else {
+            sleep_time = 2000;
          }
-         key = input;
       }
-      direction dir = get_keydir(key);
-      if (dir != NONE) {
-         cur_dir = dir;
-      }
-      int old_end_y = snake.head.y;
-      int old_end_x = snake.head.x;
+      direction cur_dir = ai_get_direction(&snake, &apple);
+      int       old_end_y = snake.head.y;
+      int       old_end_x = snake.head.x;
 
       if (snake.len > 0) {
          old_end_y = snake.positions[snake.len - 1].y;
@@ -179,16 +304,19 @@ int main(void)
       if (head->y > LINES || head->x > COLS || head->y < 0 || head->x < 0 ||
           snake_collide_with_itself_why_so_long(&snake)) {
          on_lose(&snake, &apple);
-         cur_dir = NONE;
       } else if (head->x == apple.x && head->y == apple.y) {
          on_eat(&snake, &apple);
       }
       mvwaddstr(win, head->y, head->x, head_char);
       // delete the last # from the previous render
       mvwprintw(win, 0, COLS / 2, "%d", snake.len);
+      mvwprintw(win, 0, COLS - 8 - 5, "attempt:%d", attempt);
+      mvwprintw(win, 1, COLS - 8 - 5, "highest:%d", highest);
+
       mvwaddstr(win, apple.y, apple.x, apple_char);
+
       wmove(win, head->y, head->x);
       wrefresh(win);
-      usleep(60000);
+      usleep(sleep_time);
    }
 }
